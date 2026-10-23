@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Слова-Дуэль</title>
+  <meta name="description" content="Игра для двоих: кто быстрее соберёт слово из перемешанных букв. Открывается по ссылке, ничего не нужно устанавливать.">
+  <meta name="theme-color" content="#241a5c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Слова-Дуэль">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <!-- Превью ссылки в iMessage / Telegram / WhatsApp -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Слова-Дуэль — кто быстрее соберёт слово?">
+  <meta property="og:description" content="Тебя зовут сыграть! Открой ссылку — и ты уже в игре.">
+  <meta property="og:image" content="https://abyzer-1337.github.io/Slova-Duel/icons/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <main id="app">
+
+    <section class="screen" id="home" hidden>
+      <button class="icon-btn sound" id="sound" type="button" aria-label="Звук">🔊</button>
+      <header class="hero">
+        <div class="logo" aria-label="Слова-Дуэль">
+          <div class="logo-row"><i>С</i><i>Л</i><i>О</i><i>В</i><i>А</i></div>
+          <div class="logo-row duel"><i>Д</i><i>У</i><i>Э</i><i>Л</i><i>Ь</i></div>
+        </div>
+        <p class="tagline">Кто быстрее соберёт слово?</p>
+      </header>
+
+      <label class="field">
+        <span>Как тебя зовут?</span>
+        <input id="name" maxlength="14" autocomplete="nickname" placeholder="Например, Маша">
+      </label>
+
+      <nav class="menu">
+        <button class="btn big primary" type="button" data-action="host">⚔️ Играть с другом онлайн</button>
+        <button class="btn big" type="button" data-action="join">🔑 У меня есть код</button>
+        <button class="btn big" type="button" data-action="local">📱 Вдвоём на одном телефоне</button>
+        <button class="btn big" type="button" data-action="solo">🎯 Тренировка</button>
+      </nav>
+
+      <details class="card rules">
+        <summary>Как играть?</summary>
+        <p>Оба игрока видят одну и ту же подсказку и перемешанные буквы. Нажимай буквы по порядку и собери слово <b>быстрее соперника</b> — очки достанутся тебе. Чем быстрее, тем больше очков.</p>
+        <p>💡 <b>Подсказка</b> ставит на место следующую букву, но уменьшает награду. Ошибся — нажми на букву в слове, чтобы убрать её, или ⌫.</p>
+        <p>С каждым уровнем слова длиннее, их больше, а времени меньше:</p>
+        <ul class="level-table" id="level-table"></ul>
+      </details>
+
+      <div class="a2hs" id="a2hs" hidden>
+        <span>📲 Чтобы игра была как приложение: нажми <b>Поделиться</b> <span class="share-ico">⎋</span> → <b>На экран «Домой»</b>.</span>
+        <button class="icon-btn" type="button" data-action="a2hs-close" aria-label="Скрыть">✕</button>
+      </div>
+    </section>
+
+    <section class="screen" id="lobby" hidden>
+      <div class="topbar">
+        <button class="btn ghost" type="button" data-action="menu">← Меню</button>
+        <h2 id="lobby-title"></h2>
+      </div>
+
+      <div class="card invite" id="invite" hidden>
+        <div class="code-label">Код комнаты</div>
+        <div class="code" id="room-code">—</div>
+        <div class="net-status" id="net-status"></div>
+        <button class="btn big primary" type="button" data-action="share">📤 Позвать друга</button>
+        <div class="row">
+          <button class="btn" type="button" data-action="copy">📋 Скопировать ссылку</button>
+          <button class="btn" type="button" data-action="qr">▦ QR-код</button>
+        </div>
+        <div class="qr" id="qr" hidden></div>
+        <p class="muted">Друг откроет ссылку на телефоне — и сразу попадёт в комнату. Ничего устанавливать не нужно.</p>
+      </div>
+
+      <div class="card" id="players"></div>
+
+      <div class="card">
+        <h3>С какого уровня начнём?</h3>
+        <div class="levels" id="levels"></div>
+      </div>
+
+      <button class="btn big primary" id="start" type="button" data-action="start">▶️ Начать игру</button>
+      <p class="muted center" id="lobby-hint"></p>
+    </section>
+
+    <section class="screen" id="join" hidden>
+      <div class="topbar">
+        <button class="btn ghost" type="button" data-action="menu">← Меню</button>
+        <h2>Войти в комнату</h2>
+      </div>
+      <form class="card" id="join-form">
+        <p class="invited" id="join-invite" hidden>🎉 Тебя позвали в «Слова-Дуэль»!</p>
+        <label class="field">
+          <span>Код комнаты</span>
+          <input id="join-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="6 цифр">
+        </label>
+        <label class="field">
+          <span>Твоё имя</span>
+          <input id="join-name" maxlength="14" autocomplete="nickname" placeholder="Например, Петя">
+        </label>
+        <button class="btn big primary" type="submit">Войти в игру</button>
+        <p class="muted" id="join-status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="screen" id="game" hidden>
+      <div class="scorebar">
+        <button class="icon-btn" type="button" data-action="quit" aria-label="Выйти">✕</button>
+        <div class="sb-player me"><span class="sb-name"></span><b class="sb-score">0</b></div>
+        <div class="sb-mid"><span class="sb-level"></span><span class="sb-count"></span></div>
+        <div class="sb-player opp"><span class="sb-name"></span><b class="sb-score">0</b></div>
+      </div>
+      <div class="boards" id="boards"></div>
+      <div class="countdown" id="countdown" hidden></div>
+    </section>
+
+    <section class="screen" id="results" hidden>
+      <div class="card result-card">
+        <div class="res-emoji" id="res-emoji"></div>
+        <h2 id="res-title"></h2>
+        <p class="res-sub" id="res-sub"></p>
+        <div class="res-scores" id="res-scores"></div>
+        <ol class="res-words" id="res-words"></ol>
+      </div>
+      <button class="btn big primary" id="res-next" type="button" data-action="next">Дальше</button>
+      <p class="muted center" id="res-nextinfo"></p>
+      <p class="center ready-line" id="res-ready" aria-live="polite"></p>
+      <button class="btn ghost" type="button" data-action="quit">Выйти в меню</button>
+    </section>
+
+  </main>
+  <div class="banner" id="banner" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <noscript>Для игры нужен включённый JavaScript.</noscript>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "Слова-Дуэль",
+  "short_name": "Слова-Дуэль",
+  "description": "Игра для двоих: кто быстрее соберёт слово из букв.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#241a5c",
+  "theme_color": "#241a5c",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

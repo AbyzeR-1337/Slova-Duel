@@ -1,0 +1,12 @@
+{
+  "name": "slova-duel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Слова-Дуэль — онлайн-игра для двоих: кто быстрее соберёт слово.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "npx --yes serve -l 8080 ."
+  },
+  "license": "MIT"
+}

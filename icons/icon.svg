@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b1d6e"/>
+      <stop offset="1" stop-color="#6a2f94"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g font-family="Arial Rounded MT Bold, Arial, Helvetica, sans-serif" font-weight="900" font-size="170" text-anchor="middle">
+    <g transform="rotate(-8 170 250)">
+      <rect x="62" y="140" width="216" height="232" rx="36" fill="#d6b46a"/>
+      <rect x="62" y="128" width="216" height="232" rx="36" fill="#fff3d1"/>
+      <text x="170" y="306" fill="#3b2a14">С</text>
+    </g>
+    <g transform="rotate(7 342 270)">
+      <rect x="234" y="166" width="216" height="232" rx="36" fill="#c99a00"/>
+      <rect x="234" y="154" width="216" height="232" rx="36" fill="#ffd23f"/>
+      <text x="342" y="332" fill="#3a2a00">Д</text>
+    </g>
+  </g>
+</svg>
