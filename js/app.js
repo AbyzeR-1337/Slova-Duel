@@ -1,690 +1,222 @@
-import { LEVELS, levelInfo } from './logic.js';
-import { Match } from './engine.js';
-import { HostRoom, GuestRoom, newRoomCode, randomId } from './net.js';
-import { Board } from './board.js';
-import { sfx, unlockAudio, isMuted, setMuted } from './sfx.js';
+import { $, $$, esc, session as sstore, store, cleanName } from './core/util.js';
+import { t, tn, setLang, getLang, applyStatic, LANGS } from './core/i18n.js';
+import { profile, updateProfile, publicMe, recordGame } from './core/profile.js';
+import { applyTheme } from './core/theme.js';
+import { playFx } from './core/fx.js';
+import { sfx, unlockAudio, setSound } from './core/sfx.js';
+import { Session } from './room/session.js';
+import { newRoomCode } from './net/transport.js';
+import { GAMES, GAME_IDS } from './games/registry.js';
+import { renderLobby, gameBlock, gameName } from './ui/lobby.js';
+import { renderProfile } from './ui/profile.js';
+import { renderResults } from './ui/results.js';
+import { avatar, toast, modal, confirmBox } from './ui/common.js';
 import qrcode from '../vendor/qrcode.js';
 
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => [...document.querySelectorAll(s)];
-
-const store = {
-  get(k, d = '') {
-    try {
-      return localStorage.getItem(k) ?? d;
-    } catch {
-      return d;
-    }
-  },
-  set(k, v) {
-    try {
-      localStorage.setItem(k, v);
-    } catch {}
-  },
-};
-
-const session = {
-  get(k) {
-    try {
-      return sessionStorage.getItem(k);
-    } catch {
-      return null;
-    }
-  },
-  set(k, v) {
-    try {
-      sessionStorage.setItem(k, v);
-    } catch {}
-  },
-};
-
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const cleanName = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 14);
-const other = (p) => (p === 'p1' ? 'p2' : 'p1');
-
-function plural(n, one, few, many) {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
-}
-
-function levelLine(n) {
-  const l = levelInfo(n);
-  return `${l.words} ${plural(l.words, 'слово', 'слова', 'слов')} · ${l.letters} ${plural(l.letters, 'буква', 'буквы', 'букв')} · ${l.time} с`;
-}
-
-const PEER_TIMEOUT = 9000;
-
-// Всё состояние текущей игры.
-let S = null;
-
-function freshState(mode) {
-  return {
-    mode, // 'host' | 'guest' | 'local' | 'solo'
-    me: mode === 'guest' ? 'p2' : 'p1',
-    players: mode === 'solo' ? ['p1'] : ['p1', 'p2'],
-    names: { p1: '', p2: '' },
-    scores: { p1: 0, p2: 0 },
-    level: 1,
-    lobbyLevel: 1,
-    total: 0,
-    round: null,
-    match: null,
-    room: null,
-    code: null,
-    boards: {},
-    lastSeq: 0,
-    peerHere: false,
-    peerSeen: 0,
-    myReady: false,
-    timers: [],
-  };
-}
-
-/* ---------- экраны ---------- */
+let S = null; // текущая комната
+let screen = 'home';
+const ui = { net: null, qr: false, qrSvg: '', view: null, viewKey: null, pending: [], results: null, back: 'home', mountSeq: 0, startedAt: 0 };
 
 function show(id) {
   $$('.screen').forEach((s) => (s.hidden = s.id !== id));
+  screen = id;
   window.scrollTo(0, 0);
 }
 
-function toast(text) {
-  const t = $('#toast');
-  t.textContent = text;
-  t.hidden = false;
-  t.classList.remove('show');
-  void t.offsetWidth;
-  t.classList.add('show');
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), 2200);
+/* ---------- главный экран ---------- */
+
+function renderMe() {
+  $$('.me-ava').forEach((el) => (el.innerHTML = avatar(profile, 34)));
+  $$('.me-name').forEach((el) => (el.textContent = profile.name || t('profile.noName')));
+  $('#sound-btn').textContent = profile.sound ? '🔊' : '🔇';
+  $('#lang-btn').textContent = LANGS.find((l) => l.id === getLang())?.flag || '🌐';
 }
 
-function myName() {
-  return cleanName($('#name').value) || cleanName(store.get('sd-name'));
+function renderHome() {
+  const brand = [...t('brand').toUpperCase()];
+  const half = Math.ceil(brand.length / 2);
+  const row = (letters, cls) => `<div class="logo-row ${cls}">${letters.map((ch) => `<i>${esc(ch)}</i>`).join('')}</div>`;
+  $('#logo').innerHTML = row(brand.slice(0, half), '') + row(brand.slice(half), 'alt');
+  $('#logo').setAttribute('aria-label', t('brand'));
+  $('#games-row').innerHTML = GAME_IDS.map((id) => `<div class="gbadge"><span class="gc-icon gi-${id}">${GAMES[id].icon}</span><small>${gameName(id)}</small></div>`).join('');
+  renderMe();
 }
 
-function nameOf(pid) {
-  return S.names[pid] || (pid === 'p1' ? 'Игрок 1' : 'Игрок 2');
+function relocalize() {
+  setLang(profile.lang);
+  applyStatic();
+  document.title = t('brand');
+  renderHome();
+  if (screen === 'profile') renderProfileScreen();
+  if (screen === 'room' && S?.room) renderRoom();
 }
 
-/* ---------- запуск режимов ---------- */
+/* ---------- профиль ---------- */
 
-function leave() {
-  if (!S) return;
-  if (S.room) {
-    S.room.send({ t: 'bye' });
-    const room = S.room;
-    setTimeout(() => room.close(), 150);
+function renderProfileScreen() {
+  $('#profile-body').innerHTML = renderProfile(profile);
+  $('#prof-name').addEventListener('change', (e) => setProfile({ name: e.target.value }));
+}
+
+function setProfile(patch) {
+  updateProfile(patch);
+  applyTheme(profile);
+  setSound(profile.sound);
+  if ('lang' in patch) relocalize();
+  else renderMe();
+  if (S && !S.closed) {
+    S.profile = publicMe();
+    S.send({ t: 'profile', p: S.profile });
   }
-  S.match?.stop();
-  Object.values(S.boards).forEach((b) => b.destroy());
-  S.timers.forEach(clearInterval);
-  S = null;
-  $('#banner').hidden = true;
-  $('#countdown').hidden = true;
-  releaseWake();
 }
 
-function goHome() {
-  leave();
-  history.replaceState(null, '', location.pathname + keepParams());
-  show('home');
+async function askName() {
+  if (cleanName(profile.name)) return true;
+  const id = await modal({
+    title: t('profile.askName'),
+    html: `<input class="modal-input" id="ask-name" maxlength="16" autocomplete="nickname" placeholder="${t('profile.namePh')}">`,
+    buttons: [{ id: 'ok', label: t('common.ok'), primary: true }],
+  });
+  const v = cleanName(modal.values?.['ask-name']);
+  if (id === 'ok' && v) {
+    setProfile({ name: v });
+    return true;
+  }
+  return false;
 }
 
-// Служебный параметр ?broker= (для локальной проверки) сохраняем в ссылках.
+/* ---------- комнаты ---------- */
+
 function keepParams() {
   const b = new URLSearchParams(location.search).get('broker');
-  return b ? `?broker=${encodeURIComponent(b)}` : '';
+  return b ? `broker=${encodeURIComponent(b)}` : '';
 }
 
-function makeMatch(opts) {
-  S.match = new Match({
-    players: S.players,
-    names: S.names,
-    send: (msg) => {
-      onGame(msg);
-      if (S?.mode === 'host') S.room?.send(msg);
-    },
-    ...opts,
-  });
+function setUrl(room) {
+  const q = [room ? `room=${room}` : '', keepParams()].filter(Boolean).join('&');
+  history.replaceState(null, '', location.pathname + (q ? '?' + q : ''));
 }
 
-function startHost() {
-  leave();
-  S = freshState('host');
-  S.names.p1 = myName() || 'Игрок 1';
-  S.code = newRoomCode();
-  S.myId = randomId();
-  makeMatch({ grace: 600, lateMs: 1000 });
-  S.room = new HostRoom(S.code, {
-    id: S.myId,
-    onMessage: onHostNet,
-    onStatus: hostStatus,
-    canReplaceGuest: () => !S.peerHere || S.peerLeft || Date.now() - S.peerSeen > PEER_TIMEOUT,
-  });
-  S.room.start();
-  S.startedAt = Date.now();
-  history.replaceState(null, '', location.pathname + keepParams());
-  openLobby();
-  S.match.lobby(1);
-  startHeartbeat();
-  // Если ни один сервер не ответил — подскажем, что дело в интернете.
-  S.timers.push(setInterval(() => hostStatus(S.lastStatus), 3000));
+function endSession() {
+  unmountGame();
+  closeResults();
+  if (S) S.leave();
+  S = null;
+  ui.net = null;
+  ui.qr = false;
+  sstore.set('igroteka-room', '');
+  $('#banner').hidden = true;
+  releaseWake();
 }
 
-function startGuest(code) {
-  leave();
-  S = freshState('guest');
-  S.code = code;
-  S.names.p2 = cleanName($('#join-name').value) || 'Игрок 2';
-  store.set('sd-name', S.names.p2);
-  $('#name').value = S.names.p2;
-  let id = session.get('sd-guest-' + code);
-  if (!id) {
-    id = randomId();
-    session.set('sd-guest-' + code, id);
-  }
-  S.myId = id;
-  const hint = Number(new URLSearchParams(location.search).get('b')) || 0;
-  S.room = new GuestRoom(code, {
-    id,
-    name: S.names.p2,
+async function startSession(mode, { code, hint } = {}) {
+  endSession();
+  const second =
+    mode === 'split'
+      ? { id: 'local2', name: cleanName(store.get('igroteka-p2', '')) || t('lobby.player2'), avatar: '🐼', color: '#ff922b', shape: 'circle', fx: 'confetti' }
+      : null;
+  S = new Session({
+    mode,
+    code: mode === 'online' ? newRoomCode() : code || null,
+    me: publicMe(),
+    lang: getLang(),
     hint,
-    onMessage: onGuestNet,
-    onStatus: guestStatus,
+    second,
+    botName: (n) => t('bot.name', { n }),
+    onEvent,
   });
-  S.room.start();
-  $('#join-status').textContent = 'Подключаемся…';
+  ui.startedAt = Date.now();
+  S.start();
+  if (mode === 'guest') {
+    $('#join-status').textContent = t('join.connecting');
+    sstore.set('igroteka-room', code);
+    setUrl(code);
+  } else {
+    setUrl(null);
+    show('room');
+  }
   startHeartbeat();
 }
 
-function startLocal(mode) {
-  leave();
-  S = freshState(mode);
-  if (mode === 'solo') S.names.p1 = myName() || 'Ты';
-  else {
-    S.names.p1 = myName() || 'Игрок 1';
-    S.names.p2 = cleanName(store.get('sd-name2')) || 'Игрок 2';
+function onEvent(type, data) {
+  switch (type) {
+    case 'room':
+      if (screen === 'room') renderRoom();
+      break;
+    case 'joined':
+      if (screen === 'join') {
+        sfx.join();
+        if (!S.game) show('room');
+        renderRoom();
+      }
+      break;
+    case 'net':
+      onNet(data);
+      break;
+    case 'gstart':
+      mountGame(data);
+      break;
+    case 'g':
+      deliver(data);
+      break;
+    case 'gend':
+      showResults(data);
+      break;
+    case 'gabort':
+      unmountGame();
+      show('room');
+      renderRoom();
+      break;
+    case 'full':
+      $('#join-status').textContent = t('join.full');
+      S = null;
+      break;
+    case 'kicked':
+      endSession();
+      show('home');
+      modal({ text: t('lobby.kicked') });
+      break;
+    case 'closed':
+      endSession();
+      show('home');
+      modal({ text: t('lobby.closed') });
+      break;
   }
-  makeMatch({});
-  openLobby();
-  S.match.lobby(1);
 }
 
-/* ---------- сеть ---------- */
+function onNet(st) {
+  if (!S) return;
+  if (S.mode === 'online') {
+    if (st.open > 0) ui.net = { text: '🟢 ' + t('net.open'), cls: 'ok' };
+    else if (Date.now() - ui.startedAt > 12000) ui.net = { text: '🔴 ' + t('net.noInternet'), cls: 'bad' };
+    else ui.net = { text: '🟡 ' + t('net.opening'), cls: '' };
+    const el = $('#room .net-status');
+    if (el) {
+      el.textContent = ui.net.text;
+      el.className = 'net-status ' + ui.net.cls;
+    }
+  } else if (S.mode === 'guest' && !st.joined) {
+    $('#join-status').textContent = st.attempt >= 6 ? t('join.notFound', { code: S.code }) : st.state === 'open' ? t('join.searching', { code: S.code }) : t('join.connecting');
+  }
+}
 
 function startHeartbeat() {
-  S.timers.push(
-    setInterval(() => {
-      if (!S?.room) return;
-      S.room.send({ t: 'ping' });
-      checkPeer();
-    }, 2500),
-  );
-}
-
-function checkPeer() {
-  if (!S || !S.peerHere) return;
-  const lost = Date.now() - S.peerSeen > PEER_TIMEOUT;
-  const banner = $('#banner');
-  const opp = nameOf(other(S.me));
-  if (S.peerLeft) {
-    banner.innerHTML = `${esc(opp)} вышел(а) из игры. <button class="btn small" data-action="menu">В меню</button>`;
-    banner.hidden = false;
-  } else if (lost) {
-    banner.textContent = `⚠️ ${opp} не на связи… ждём`;
-    banner.hidden = false;
-  } else {
-    banner.hidden = true;
-  }
-  if (!$('#lobby').hidden) renderLobby();
-}
-
-function hostStatus(st) {
-  if (!S || S.mode !== 'host' || !st) return;
-  S.lastStatus = st;
-  const el = $('#net-status');
-  if (st.open > 0) {
-    el.textContent = '🟢 Комната открыта';
-    el.className = 'net-status ok';
-  } else if (Date.now() - S.startedAt > 12000) {
-    el.textContent = '🔴 Нет связи с игровым сервером. Проверь интернет.';
-    el.className = 'net-status bad';
-  } else {
-    el.textContent = '🟡 Открываем комнату…';
-    el.className = 'net-status';
-  }
-}
-
-function guestStatus(st) {
-  if (!S || S.mode !== 'guest' || S.joined || S.full) return;
-  const el = $('#join-status');
-  if (st.attempt >= 6) el.textContent = `Не находим комнату ${S.code}. Проверь код или попроси друга создать новую — продолжаем искать…`;
-  else if (st.state === 'open') el.textContent = `Ищем комнату ${S.code}…`;
-  else el.textContent = 'Подключаемся…';
-}
-
-function onHostNet(msg) {
-  if (!S) return;
-  const wasGone = !S.peerHere || S.peerLeft;
-  S.peerSeen = Date.now();
-  S.peerLeft = false;
-  switch (msg.t) {
-    case 'hello': {
-      const fresh = wasGone;
-      S.peerHere = true;
-      S.names.p2 = cleanName(msg.name) || 'Игрок 2';
-      S.match.names.p2 = S.names.p2;
-      S.room.send({ t: 'welcome', names: { ...S.match.names }, snap: S.match.snapshot() });
-      if (S.match.phase === 'lobby') S.match.lobby();
-      if (fresh) {
-        sfx.go();
-        toast(`${S.names.p2} в игре!`);
-      }
-      checkPeer();
-      break;
+  clearInterval(ui.hb);
+  ui.hb = setInterval(() => {
+    if (!S || S.closed) return;
+    if (S.mode === 'online' && !ui.net) onNet({ open: 0 });
+    const banner = $('#banner');
+    if (S.mode === 'guest' && S.room) {
+      const lost = Date.now() - S.lastHostMsg > 10000;
+      banner.hidden = !lost;
+      if (lost) banner.textContent = '⚠️ ' + t('net.hostLost');
     }
-    case 'solve':
-      S.match.claim('p2', msg);
-      break;
-    case 'ready':
-      S.match.setReady('p2');
-      break;
-    case 'prog':
-      onGame({ t: 'prog', p: 'p2', n: msg.n, i: msg.i });
-      break;
-    case 'bye':
-      S.peerLeft = true;
-      checkPeer();
-      break;
-  }
+  }, 2000);
 }
 
-function onGuestNet(msg) {
-  if (!S) return;
-  S.peerSeen = Date.now();
-  switch (msg.t) {
-    case 'welcome':
-      S.joined = true;
-      S.peerHere = true;
-      S.peerLeft = false;
-      Object.assign(S.names, msg.names);
-      store.set('sd-name', S.names.p2);
-      history.replaceState(null, '', location.pathname + `?room=${S.code}` + keepParams().replace('?', '&'));
-      (msg.snap || []).forEach((m) => m && onGame(m));
-      checkPeer();
-      break;
-    case 'full': {
-      S.full = true;
-      $('#join-status').textContent = 'В этой комнате уже играют двое. Попроси друга создать новую комнату.';
-      const room = S.room;
-      S.room = null;
-      room.close();
-      break;
-    }
-    case 'bye':
-      S.peerLeft = true;
-      checkPeer();
-      break;
-    case 'ping':
-      break;
-    default:
-      onGame(msg);
-  }
-}
-
-/* ---------- действия игрока ---------- */
-
-function act(pid, action) {
-  if (!S) return;
-  if (S.mode === 'guest') {
-    S.room?.send(action);
-    return;
-  }
-  if (action.t === 'solve') S.match.claim(pid, action);
-  else if (action.t === 'ready') S.match.setReady(pid);
-  else if (action.t === 'prog' && S.mode === 'host') S.room?.send({ t: 'prog', p: pid, n: action.n, i: action.i });
-}
-
-/* ---------- лобби ---------- */
-
-function openLobby() {
-  const m = S.mode;
-  $('#lobby-title').textContent =
-    m === 'host' ? 'Игра с другом' : m === 'guest' ? `Комната ${S.code}` : m === 'local' ? 'Вдвоём на одном телефоне' : 'Тренировка';
-  $('#invite').hidden = m !== 'host';
-  $('#qr').hidden = true;
-  if (m === 'host') {
-    $('#room-code').textContent = S.code.replace(/(\d{3})(\d{3})/, '$1 $2');
-    $('#net-status').textContent = '🟡 Открываем комнату…';
-  }
-  const players = $('#players');
-  players.hidden = m === 'solo';
-  if (m === 'local') {
-    players.innerHTML = `
-      <h3>Игроки</h3>
-      <label class="field p1"><span>Снизу</span><input id="local-p1" maxlength="14" value="${esc(S.names.p1)}"></label>
-      <label class="field p2"><span>Сверху (экран перевёрнут)</span><input id="local-p2" maxlength="14" value="${esc(S.names.p2)}"></label>`;
-  }
-  show('lobby');
-  renderLobby();
-}
-
-function renderLobby() {
-  if (!S) return;
-  const m = S.mode;
-  const editable = m !== 'guest';
-  $('#levels').innerHTML = LEVELS.map(
-    (l) => `<button type="button" class="level ${l.n === S.lobbyLevel ? 'sel' : ''}" data-level="${l.n}" ${editable ? '' : 'disabled'}>
-      <b>${l.n}</b><span class="lv-name">${l.name}</span><span class="lv-info">${levelLine(l.n)}</span></button>`,
-  ).join('');
-  if (m === 'host' || m === 'guest') {
-    const lost = S.peerHere && Date.now() - S.peerSeen > PEER_TIMEOUT;
-    const friend =
-      m === 'host'
-        ? S.peerHere
-          ? `<li class="p2">${lost ? '⚠️' : '✅'} ${esc(nameOf('p2'))}</li>`
-          : `<li class="wait"><span class="dots"></span> Ждём друга…</li>`
-        : `<li class="p2">✅ ${esc(nameOf('p2'))} <small>(ты)</small></li>`;
-    $('#players').innerHTML = `<h3>Игроки</h3><ul class="plist">
-      <li class="p1">👑 ${esc(nameOf('p1'))} ${m === 'host' ? '<small>(ты)</small>' : ''}</li>${friend}</ul>`;
-  }
-  const start = $('#start');
-  start.hidden = m === 'guest';
-  start.disabled = m === 'host' && !S.peerHere;
-  const hint = $('#lobby-hint');
-  if (m === 'host') hint.textContent = S.peerHere ? 'Выбери уровень и жми «Начать»!' : 'Отправь другу приглашение — «Начать» включится, когда друг зайдёт.';
-  else if (m === 'guest') hint.textContent = `Ждём, когда ${nameOf('p1')} начнёт игру…`;
-  else if (m === 'local') hint.textContent = 'Положите телефон между собой: верхний игрок играет «вверх ногами».';
-  else hint.textContent = 'Собирай слова на время и набирай очки.';
-}
-
-function pickLevel(n) {
-  if (!S || S.mode === 'guest') return;
-  S.lobbyLevel = n;
-  S.match.lobby(n);
-}
-
-function startGame() {
-  if (!S || S.mode === 'guest') return;
-  if (S.mode === 'local') {
-    S.names.p1 = cleanName($('#local-p1').value) || 'Игрок 1';
-    S.names.p2 = cleanName($('#local-p2').value) || 'Игрок 2';
-    store.set('sd-name2', S.names.p2);
-    S.match.names = { ...S.names };
-  }
-  S.match.start(S.lobbyLevel);
-}
-
-/* ---------- игра ---------- */
-
-function buildBoards() {
-  const wrap = $('#boards');
-  Object.values(S.boards).forEach((b) => b.destroy());
-  wrap.innerHTML = '';
-  S.boards = {};
-  const split = S.mode === 'local';
-  $('#game').classList.toggle('split', split);
-  $('#game').classList.toggle('solo', S.mode === 'solo');
-  const mk = (pid, cls) => {
-    const el = document.createElement('div');
-    el.className = `board ${pid} ${cls}`;
-    wrap.append(el);
-    S.boards[pid] = new Board(el, {
-      ticks: pid === S.me,
-      onSolve: ({ ms, hints }) => act(pid, { t: 'solve', i: S.round?.i, ms, hints }),
-      onProgress: (n) => act(pid, { t: 'prog', i: S.round?.i, n }),
-    });
-  };
-  if (split) {
-    mk('p2', 'flipped');
-    const mid = document.createElement('div');
-    mid.className = 'midstrip';
-    mid.innerHTML = `<button class="icon-btn" data-action="quit" aria-label="Выйти">✕</button>
-      <span class="sb-level"></span><span class="sb-count"></span>`;
-    wrap.append(mid);
-    mk('p1', '');
-  } else {
-    mk(S.me, '');
-  }
-  S.boardsMode = S.mode;
-}
-
-function renderScores() {
-  const me = S.me;
-  const opp = other(me);
-  $('.sb-player.me').dataset.p = me;
-  $('.sb-player.opp').dataset.p = opp;
-  $('.sb-player.me .sb-name').textContent = nameOf(me);
-  $('.sb-player.me .sb-score').textContent = S.scores[me] ?? 0;
-  $('.sb-player.opp .sb-name').textContent = nameOf(opp);
-  $('.sb-player.opp .sb-score').textContent = S.scores[opp] ?? 0;
-  for (const [pid, b] of Object.entries(S.boards)) b.setHead(nameOf(pid), S.scores[pid] ?? 0);
-}
-
-function setLabels(level, count) {
-  $$('#game .sb-level').forEach((el) => (el.textContent = level));
-  $$('#game .sb-count').forEach((el) => (el.textContent = count));
-}
-
-function onGame(msg) {
-  if (!S) return;
-  if (msg.seq) {
-    if (msg.seq <= S.lastSeq) return;
-    S.lastSeq = msg.seq;
-  }
-  switch (msg.t) {
-    case 'lobby':
-      S.lobbyLevel = msg.level;
-      Object.assign(S.names, msg.names);
-      $('#countdown').hidden = true;
-      if ($('#lobby').hidden) openLobby();
-      else renderLobby();
-      break;
-    case 'level':
-      onLevel(msg);
-      break;
-    case 'round':
-      onRound(msg);
-      break;
-    case 'result':
-      onResult(msg);
-      break;
-    case 'levelEnd':
-      onLevelEnd(msg);
-      break;
-    case 'ready':
-      onReady(msg.ready);
-      break;
-    case 'prog':
-      if (msg.p !== S.me && S.round && msg.i === S.round.i) S.boards[S.me]?.setOpponent(msg.n);
-      break;
-  }
-}
-
-function onLevel(msg) {
-  S.level = msg.level;
-  S.total = msg.total;
-  Object.assign(S.names, msg.names);
-  S.scores = { ...msg.scores };
-  S.round = null;
-  S.myReady = false;
-  if (S.boardsMode !== S.mode || !$('#boards').children.length) buildBoards();
-  Object.values(S.boards).forEach((b) => b.idle());
-  show('game');
-  keepAwake();
-  renderScores();
-  setLabels(`Уровень ${msg.level} · ${msg.name}`, `${msg.total} ${plural(msg.total, 'слово', 'слова', 'слов')}`);
-  if (msg.countdown > 0) countdown(msg);
-}
-
-function countdown(msg) {
-  const box = $('#countdown');
-  const copies = S.mode === 'local' ? 2 : 1;
-  const info = `${levelLine(msg.level)} на слово`;
-  const draw = (n) => {
-    box.innerHTML = Array.from(
-      { length: copies },
-      (_, k) => `<div class="cd-copy ${k === 1 ? 'flipped' : ''}">
-        <div class="cd-level">Уровень ${msg.level} · ${esc(msg.name)}</div>
-        <div class="cd-info">${info}</div>
-        <div class="cd-num">${n}</div></div>`,
-    ).join('');
-  };
-  box.hidden = false;
-  const step = msg.countdown / 3;
-  let n = 3;
-  draw(n);
-  sfx.tick();
-  clearInterval(S.cdTimer);
-  const timer = setInterval(() => {
-    n--;
-    if (n <= 0 || !S) {
-      clearInterval(timer);
-      return;
-    }
-    draw(n);
-    sfx.tick();
-  }, step);
-  S.cdTimer = timer;
-}
-
-function onRound(msg) {
-  clearInterval(S.cdTimer);
-  $('#countdown').hidden = true;
-  if (S.boardsMode !== S.mode || !$('#boards').children.length) buildBoards();
-  if ($('#game').hidden) show('game');
-  S.round = msg;
-  S.scores = { ...msg.scores };
-  renderScores();
-  setLabels(`Уровень ${S.level}`, `Слово ${msg.i + 1} из ${msg.total}`);
-  const online = S.mode === 'host' || S.mode === 'guest';
-  Object.values(S.boards).forEach((b) => b.setRound(msg, { showOpponent: online }));
-  if (!msg.elapsed) sfx.go();
-}
-
-function secs(ms) {
-  return (ms / 1000).toFixed(1).replace('.', ',');
-}
-
-function onResult(msg) {
-  S.scores = { ...msg.scores };
-  renderScores();
-  const solo = S.mode === 'solo';
-  for (const [pid, board] of Object.entries(S.boards)) {
-    let outcome;
-    let text;
-    const word = `<span class="word">${msg.word}</span>`;
-    if (msg.winner === pid) {
-      outcome = 'win';
-      text = `${solo ? '✅' : '🎉'} <b>+${msg.points}</b> за ${secs(msg.ms)} с`;
-    } else if (msg.winner) {
-      outcome = 'lose';
-      const by = msg.solved.includes(pid) && msg.margin != null ? ` на ${secs(msg.margin)} с` : '';
-      text = `⚡ ${esc(nameOf(msg.winner))} быстрее${by}<br>${word}`;
-    } else {
-      outcome = 'timeout';
-      text = `⏰ Время вышло<br>${word}`;
-    }
-    board.showResult(msg, { outcome, text });
-  }
-  if (S.mode === 'local') msg.winner ? sfx.win() : sfx.timeout();
-  else if (msg.winner === S.me) sfx.win();
-  else if (msg.winner) sfx.lose();
-  else sfx.timeout();
-}
-
-function onLevelEnd(msg) {
-  clearInterval(S.cdTimer);
-  $('#countdown').hidden = true;
-  Object.values(S.boards).forEach((b) => b.stopTimer());
-  S.scores = { ...msg.scores };
-  S.myReady = false;
-  S.lastLevelEnd = msg;
-  const solo = S.mode === 'solo';
-  const winner = msg.final ? msg.matchWinner : msg.levelWinner;
-  let emoji;
-  let title;
-  let sub;
-  if (msg.final) {
-    title = 'Матч окончен!';
-    if (solo) {
-      emoji = '🏆';
-      sub = `Твой итог: <b>${msg.scores.p1}</b> очков`;
-    } else if (winner) {
-      emoji = S.mode === 'local' || winner === S.me ? '🏆' : '🥈';
-      sub = `Победитель матча: <b>${esc(nameOf(winner))}</b>!`;
-    } else {
-      emoji = '🤝';
-      sub = 'Ничья — вы достойные соперники!';
-    }
-  } else {
-    title = `Уровень ${msg.level} пройден`;
-    if (solo) {
-      emoji = '⭐';
-      sub = `За уровень: <b>${msg.levelScores.p1}</b> очков`;
-    } else if (winner) {
-      emoji = S.mode === 'local' || winner === S.me ? '🥇' : '💪';
-      sub = `Победитель уровня: <b>${esc(nameOf(winner))}</b>`;
-    } else {
-      emoji = '🤝';
-      sub = 'Уровень вничью';
-    }
-  }
-  $('#res-emoji').textContent = emoji;
-  $('#res-title').textContent = title;
-  $('#res-sub').innerHTML = sub;
-  const ids = S.players;
-  $('#res-scores').innerHTML = `<table><thead><tr><th></th><th>Уровень</th><th>Всего</th></tr></thead><tbody>${ids
-    .map(
-      (p) => `<tr class="${p}"><td>${esc(nameOf(p))}${p === S.me && S.mode !== 'local' && !solo ? ' <small>(ты)</small>' : ''}</td>
-      <td>${msg.levelScores[p]}</td><td><b>${msg.scores[p]}</b></td></tr>`,
-    )
-    .join('')}</tbody></table>`;
-  $('#res-words').innerHTML = msg.history
-    .map((h) => {
-      const who = h.winner ? (solo ? `+${h.points}` : esc(nameOf(h.winner))) : '—';
-      return `<li class="${h.winner || 'none'}"><span>${h.word}</span><span>${who}</span></li>`;
-    })
-    .join('');
-  const next = $('#res-next');
-  next.disabled = false;
-  next.textContent = msg.final ? '🔁 Сыграть ещё' : `Дальше: уровень ${msg.level + 1} →`;
-  $('#res-nextinfo').textContent = msg.final ? '' : `${LEVELS[msg.level].name}: ${levelLine(msg.level + 1)} на слово`;
-  $('#res-ready').textContent = '';
-  show('results');
-  releaseWake();
-  if (msg.final && (solo || S.mode === 'local' || winner === S.me)) {
-    sfx.fanfare();
-    confetti();
-  }
-}
-
-function onReady(ready) {
-  if (!S || S.mode === 'local' || S.mode === 'solo') return;
-  const opp = other(S.me);
-  const parts = [];
-  if (ready[S.me]) parts.push('Ты готов(а) ✓');
-  parts.push(ready[opp] ? `${nameOf(opp)} готов(а) ✓` : `Ждём: ${nameOf(opp)}…`);
-  $('#res-ready').textContent = parts.join(' · ');
-  if (ready[S.me]) {
-    $('#res-next').disabled = true;
-  }
-}
-
-function pressNext() {
-  if (!S || S.myReady) return;
-  S.myReady = true;
-  if (S.mode === 'local') {
-    S.match.setReady('p1');
-    S.match.setReady('p2');
-  } else {
-    act(S.me, { t: 'ready' });
-    $('#res-next').disabled = true;
-    if (S.mode === 'guest') $('#res-ready').textContent = `Ждём: ${nameOf('p1')}…`;
-  }
+function renderRoom() {
+  if (!S?.room) return;
+  $('#room').innerHTML = renderLobby(S, ui);
 }
 
 /* ---------- приглашение ---------- */
@@ -692,7 +224,7 @@ function pressNext() {
 function inviteUrl() {
   const u = new URL(location.pathname, location.origin);
   u.searchParams.set('room', S.code);
-  const first = S.room?.firstOpen ?? -1;
+  const first = S.transport?.firstOpen ?? -1;
   if (first > 0) u.searchParams.set('b', first);
   const broker = new URLSearchParams(location.search).get('broker');
   if (broker) u.searchParams.set('broker', broker);
@@ -707,8 +239,7 @@ async function copyText(text) {
     const ta = document.createElement('textarea');
     ta.value = text;
     ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
+    ta.style.cssText = 'position:fixed;opacity:0';
     document.body.append(ta);
     ta.select();
     ta.setSelectionRange(0, text.length);
@@ -719,35 +250,105 @@ async function copyText(text) {
 }
 
 async function copyLink() {
-  const ok = await copyText(inviteUrl());
-  toast(ok ? 'Ссылка скопирована — вставь её в чат другу' : 'Не получилось скопировать');
+  toast((await copyText(inviteUrl())) ? t('lobby.copied') : t('lobby.copyFail'));
 }
 
 async function shareInvite() {
   const url = inviteUrl();
-  const text = `${nameOf('p1')} зовёт тебя в «Слова-Дуэль»! Кто быстрее соберёт слово? Код комнаты: ${S.code}`;
+  const text = t('lobby.shareText', { name: profile.name, code: S.code });
   if (navigator.share) {
     try {
-      await navigator.share({ title: 'Слова-Дуэль', text, url });
+      await navigator.share({ title: t('brand'), text, url });
     } catch (e) {
       if (e.name !== 'AbortError') copyLink();
     }
-  } else {
-    copyLink();
-  }
+  } else copyLink();
 }
 
 function toggleQr() {
-  const box = $('#qr');
-  if (!box.hidden) {
-    box.hidden = true;
-    return;
+  ui.qr = !ui.qr;
+  if (ui.qr) {
+    const qr = qrcode(0, 'M');
+    qr.addData(inviteUrl());
+    qr.make();
+    ui.qrSvg = qr.createSvgTag(6, 3);
   }
-  const qr = qrcode(0, 'M');
-  qr.addData(inviteUrl());
-  qr.make();
-  box.innerHTML = qr.createSvgTag(6, 3) + '<p>Друг наводит камеру iPhone на код — и сразу попадает в игру</p>';
+  renderRoom();
+}
+
+/* ---------- игра ---------- */
+
+function unmountGame() {
+  ui.mountSeq++;
+  try {
+    ui.view?.destroy();
+  } catch {}
+  ui.view = null;
+  ui.viewKey = null;
+  ui.pending = [];
+  $('#gview').innerHTML = '';
+}
+
+async function mountGame(gs) {
+  const key = gs.gameId + ':' + gs.seats.map((s) => s.id).join(',');
+  // Переподключились к той же партии — экран не пересоздаём.
+  if (ui.viewKey === key && !ui.results && screen === 'game') return;
+  closeResults();
+  unmountGame();
+  const seq = ui.mountSeq;
+  ui.viewKey = key;
+  show('game');
+  $('#game .gicon').textContent = GAMES[gs.gameId].icon;
+  $('#game .gicon').className = `gicon gi-${gs.gameId}`;
+  $('#game .gname').textContent = gameName(gs.gameId);
+  $('#game .ginfo').textContent = '';
+  const mod = await GAMES[gs.gameId].view();
+  if (seq !== ui.mountSeq) return;
+  const seats = gs.seats;
+  const api = {
+    me: S.me,
+    localSeats: S.localSeats,
+    seats,
+    seat: (id) => seats.find((s) => s.id === id),
+    settings: gs.settings,
+    lang: gs.lang,
+    isHost: S.isHost,
+    act: (d, asId) => S?.act(d, asId),
+    t,
+    tn,
+    setInfo: (text) => ($('#game .ginfo').textContent = text ? ' · ' + text : ''),
+  };
+  ui.view = mod.mount($('#gview'), api);
+  const pending = ui.pending;
+  ui.pending = [];
+  for (const d of pending) ui.view.msg(d);
+  keepAwake();
+}
+
+function deliver(d) {
+  if (ui.view) ui.view.msg(d);
+  else ui.pending.push(d);
+}
+
+function showResults(m) {
+  ui.results = m;
+  const box = $('#results');
+  box.innerHTML = renderResults(m, S.me);
   box.hidden = false;
+  const me = m.ranking.find((r) => r.id === S.me);
+  if (me) recordGame(m.gameId, me.place, m.ranking.length);
+  const winner = m.ranking.find((r) => r.place === 1);
+  if (winner && m.ranking.length > 1) {
+    playFx(winner.fx, { emoji: winner.avatar, color: winner.color });
+    sfx.fanfare();
+  }
+  releaseWake();
+}
+
+function closeResults() {
+  ui.results = null;
+  $('#results').hidden = true;
+  $('#results').innerHTML = '';
 }
 
 /* ---------- мелочи ---------- */
@@ -766,126 +367,176 @@ function releaseWake() {
   wakeLock = null;
 }
 
-function confetti() {
-  const box = document.createElement('div');
-  box.className = 'confetti';
-  const colors = ['#ffd23f', '#ff6b6b', '#4dabf7', '#69db7c', '#da77f2'];
-  for (let i = 0; i < 70; i++) {
-    const s = document.createElement('i');
-    s.style.left = Math.random() * 100 + '%';
-    s.style.background = colors[i % colors.length];
-    s.style.animationDelay = Math.random() * 0.8 + 's';
-    s.style.animationDuration = 2 + Math.random() * 1.5 + 's';
-    s.style.transform = `rotate(${Math.random() * 360}deg)`;
-    box.append(s);
-  }
-  document.body.append(box);
-  setTimeout(() => box.remove(), 4500);
-}
-
 function isIos() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
-
 function isStandalone() {
   return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 }
 
-function renderSound() {
-  $('#sound').textContent = isMuted() ? '🔇' : '🔊';
-}
-
 function openJoin(code, invited) {
-  leave();
   $('#join-code').value = code || '';
-  $('#join-name').value = myName();
+  $('#join-name').value = profile.name;
   $('#join-invite').hidden = !invited;
   $('#join-status').textContent = '';
+  renderMe();
   show('join');
-  if (!invited) $('#join-code').focus();
 }
 
-function joinGo() {
+async function joinGo() {
   const code = $('#join-code').value.replace(/\D/g, '');
+  const name = cleanName($('#join-name').value);
   if (code.length !== 6) {
-    $('#join-status').textContent = 'Код — это 6 цифр. Его видно у друга на экране.';
+    $('#join-status').textContent = t('join.badCode');
     return;
   }
-  if (!cleanName($('#join-name').value)) {
+  if (!name) {
     $('#join-name').focus();
-    $('#join-status').textContent = 'Напиши своё имя, чтобы друг знал, кто пришёл.';
+    $('#join-status').textContent = t('join.needName');
     return;
   }
-  startGuest(code);
+  setProfile({ name });
+  const hint = Number(new URLSearchParams(location.search).get('b')) || 0;
+  await startSession('guest', { code, hint });
 }
 
-/* ---------- события ---------- */
+async function pickLang() {
+  const id = await modal({
+    title: t('profile.language'),
+    html: `<div class="lang-list">${LANGS.map((l) => `<button class="lang-opt ${l.id === getLang() ? 'sel' : ''}" data-id="${l.id}">${l.flag} ${l.name}</button>`).join('')}</div>`,
+    buttons: [{ id: 'cancel', label: t('common.cancel') }],
+  });
+  if (id && id !== 'cancel') setProfile({ lang: id });
+}
+
+/* ---------- действия ---------- */
 
 const ACTIONS = {
-  host: startHost,
+  profile: () => {
+    ui.back = screen === 'profile' ? ui.back : screen;
+    renderProfileScreen();
+    show('profile');
+  },
+  home: () => {
+    if (screen === 'profile' && ui.back && ui.back !== 'profile') {
+      const back = ui.back;
+      if (back === 'room') renderRoom();
+      if (back === 'join') renderMe();
+      return show(back);
+    }
+    if (S && screen === 'join') endSession();
+    show('home');
+  },
+  lang: pickLang,
+  sound: () => setProfile({ sound: !profile.sound }),
+  create: async () => (await askName()) && startSession('online'),
   join: () => openJoin('', false),
-  local: () => startLocal('local'),
-  solo: () => startLocal('solo'),
-  menu: goHome,
-  quit: () => {
-    if (S && (S.mode === 'local' || S.mode === 'solo' || confirm('Выйти из игры?'))) goHome();
+  offline: async () => {
+    if (!cleanName(profile.name)) setProfile({ name: t('profile.defaultName') });
+    startSession('local');
+  },
+  split: async () => {
+    if (!cleanName(profile.name)) setProfile({ name: t('lobby.player1') });
+    startSession('split');
+  },
+  'a2hs-close': () => {
+    $('#a2hs').hidden = true;
+    store.set('igroteka-a2hs', '1');
+  },
+  leave: async () => {
+    const guests = S?.room?.players.some((p) => !p.host && !p.bot && !p.local);
+    if (S?.mode === 'online' && guests && !(await confirmBox(t('lobby.closeConfirm'), t('lobby.closeRoom')))) return;
+    endSession();
+    setUrl(null);
+    show('home');
   },
   share: shareInvite,
   copy: copyLink,
   qr: toggleQr,
-  start: startGame,
-  next: pressNext,
-  'a2hs-close': () => {
-    $('#a2hs').hidden = true;
-    store.set('sd-a2hs', '1');
+  pick: (el) => S?.send({ t: 'pick', game: el.dataset.game }),
+  set: (el) => S?.send({ t: 'set', key: el.dataset.key, value: JSON.parse(el.dataset.value) }),
+  'room-lang': (el) => S?.send({ t: 'lang', lang: el.dataset.lang }),
+  addBot: () => S?.send({ t: 'addBot' }),
+  kick: async (el) => {
+    const p = S?.room?.players.find((x) => x.id === el.dataset.id);
+    if (p && (await confirmBox(t('lobby.kickConfirm', { name: p.name }), t('lobby.kick')))) S.send({ t: 'kick', id: p.id });
   },
+  start: () => {
+    if (S && !gameBlock(S, S.room.gameId)) S.send({ t: 'start' });
+  },
+  quit: async () => {
+    if (!S) return show('home');
+    if (S.isHost) {
+      const r = await modal({
+        text: t('game.endConfirm'),
+        buttons: [
+          { id: 'no', label: t('game.continue') },
+          { id: 'end', label: t('game.endForAll'), primary: true, danger: true },
+        ],
+      });
+      if (r === 'end') S.send({ t: 'end' });
+    } else if (await confirmBox(t('game.leaveConfirm'), t('game.leave'))) {
+      endSession();
+      setUrl(null);
+      show('home');
+    }
+  },
+  'results-close': () => {
+    closeResults();
+    if (S?.game) return;
+    unmountGame();
+    show(S ? 'room' : 'home');
+    renderRoom();
+  },
+  'p-avatar': (el) => setProfile({ avatar: el.dataset.v }) || renderProfileScreen(),
+  'p-color': (el) => setProfile({ color: el.dataset.v }) || renderProfileScreen(),
+  'p-shape': (el) => setProfile({ shape: el.dataset.v }) || renderProfileScreen(),
+  'p-fx': (el) => {
+    setProfile({ fx: el.dataset.v });
+    renderProfileScreen();
+    playFx(el.dataset.v, { emoji: profile.avatar, color: profile.color, duration: 2600 });
+  },
+  'fx-preview': (el) => playFx(el.dataset.v, { emoji: profile.avatar, color: profile.color, duration: 2600 }),
+  'p-bg': (el) => setProfile({ bg: el.dataset.v }) || renderProfileScreen(),
+  'p-accent': (el) => setProfile({ accent: el.dataset.v }) || renderProfileScreen(),
+  'p-style': (el) => setProfile({ style: el.dataset.v }) || renderProfileScreen(),
+  'p-lang': (el) => setProfile({ lang: el.dataset.v }),
+  'p-sound': (el) => setProfile({ sound: el.dataset.v === '1' }) || renderProfileScreen(),
 };
 
 function init() {
-  $('#name').value = store.get('sd-name');
-  $('#level-table').innerHTML = LEVELS.map((l) => `<li><b>${l.n}. ${l.name}</b> — ${levelLine(l.n)} на слово</li>`).join('');
-  $('#name').addEventListener('input', () => store.set('sd-name', cleanName($('#name').value)));
-  renderSound();
+  setLang(profile.lang);
+  applyTheme(profile);
+  setSound(profile.sound);
+  applyStatic();
+  document.title = t('brand');
+  renderHome();
 
   document.addEventListener('click', (e) => {
-    const lv = e.target.closest('[data-level]');
-    if (lv && !lv.disabled) return pickLevel(Number(lv.dataset.level));
     const a = e.target.closest('[data-action]');
-    if (a && ACTIONS[a.dataset.action]) ACTIONS[a.dataset.action]();
+    if (!a || a.disabled) return;
+    const fn = ACTIONS[a.dataset.action];
+    if (fn) fn(a, e);
   });
   document.addEventListener('pointerdown', unlockAudio, { capture: true });
-  $('#sound').addEventListener('click', () => {
-    setMuted(!isMuted());
-    renderSound();
-  });
   $('#join-form').addEventListener('submit', (e) => {
     e.preventDefault();
     joinGo();
   });
   $('#join-code').addEventListener('input', (e) => (e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6)));
-
-  document.addEventListener('keydown', (e) => {
-    if (!S || $('#game').hidden || e.metaKey || e.ctrlKey || e.altKey) return;
-    const b = S.boards[S.me];
-    if (b) {
-      if (e.key === 'Backspace') e.preventDefault();
-      b.handleKey(e);
-    }
-  });
-
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !S) return;
-    S.room?.wake();
-    if (!$('#game').hidden) keepAwake();
+    S.wake();
+    if (screen === 'game') keepAwake();
   });
 
-  if (isIos() && !isStandalone() && !store.get('sd-a2hs')) $('#a2hs').hidden = false;
+  if (isIos() && !isStandalone() && !store.get('igroteka-a2hs')) $('#a2hs').hidden = false;
 
   const room = new URLSearchParams(location.search).get('room');
   if (room && /^\d{6}$/.test(room)) {
     openJoin(room, true);
     // Страница перезагрузилась посреди игры — возвращаемся в ту же комнату сами.
-    if (session.get('sd-guest-' + room) && cleanName($('#join-name').value)) startGuest(room);
+    if (sstore.get('igroteka-room') === room && cleanName(profile.name)) joinGo();
   } else {
     show('home');
   }

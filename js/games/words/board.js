@@ -1,5 +1,6 @@
 import { MAX_HINTS } from './logic.js';
-import { sfx } from './sfx.js';
+import { sfx } from '../../core/sfx.js';
+import { t } from '../../core/i18n.js';
 
 // Раскладка ЙЦУКЕН по физическим клавишам — чтобы на компьютере
 // можно было печатать, даже если включена английская раскладка.
@@ -16,11 +17,10 @@ const TEMPLATE = `
   <div class="timer"><div class="timer-fill"></div><span class="timer-text"></span></div>
   <div class="clue"></div>
   <div class="slots"></div>
-  <div class="opp" hidden><span class="opp-label">Соперник</span><span class="opp-dots"></span></div>
   <div class="tiles"></div>
   <div class="controls">
-    <button class="btn ctl hint" type="button">💡 Подсказка <span class="hint-left"></span></button>
-    <button class="btn ctl back" type="button" aria-label="Стереть букву">⌫</button>
+    <button class="btn ctl hint" type="button">💡 <span class="hint-label"></span> <span class="hint-left"></span></button>
+    <button class="btn ctl back" type="button">⌫</button>
   </div>
   <div class="board-msg" hidden></div>
 `;
@@ -55,8 +55,6 @@ export class Board {
       clue: q('.clue'),
       slots: q('.slots'),
       tiles: q('.tiles'),
-      opp: q('.opp'),
-      oppDots: q('.opp-dots'),
       hint: q('.hint'),
       hintLeft: q('.hint-left'),
       back: q('.back'),
@@ -70,6 +68,8 @@ export class Board {
       const s = e.target.closest('.slot');
       if (s) this.remove(Number(s.dataset.i));
     });
+    q('.hint-label').textContent = t('words.hint');
+    this.el.back.setAttribute('aria-label', t('words.erase'));
     onTap(this.el.hint, () => this.hint());
     onTap(this.el.back, () => this.backspace());
     this.idle();
@@ -85,16 +85,15 @@ export class Board {
     this.r = null;
     this.done = true;
     this.root.classList.remove('solved', 'expired', 'won', 'lost');
-    this.el.clue.textContent = 'Приготовься…';
+    this.el.clue.textContent = t('words.ready');
     this.el.slots.innerHTML = '';
     this.el.tiles.innerHTML = '';
     this.el.msg.hidden = true;
-    this.el.opp.hidden = true;
     this.el.fill.style.transform = 'scaleX(1)';
     this.el.time.textContent = '';
   }
 
-  setRound(r, { showOpponent = false } = {}) {
+  setRound(r) {
     this.stopTimer();
     this.r = r;
     this.word = r.word;
@@ -118,8 +117,6 @@ export class Board {
     this.el.tiles.innerHTML = this.tiles
       .map((t) => `<button class="tile" type="button" data-id="${t.id}">${t.ch}</button>`)
       .join('');
-    this.el.opp.hidden = !showOpponent;
-    this.setOpponent(0);
     this.render();
     this.tick();
   }
@@ -225,17 +222,12 @@ export class Board {
   handleKey(e) {
     if (e.key === 'Backspace') return this.backspace();
     let ch = e.key.length === 1 ? e.key.toUpperCase() : '';
-    if (!/[А-Я]/.test(ch)) ch = KEYMAP[e.code] || '';
+    const cyr = this.tiles?.some((x) => /[А-ЯІЇЄҐ]/.test(x.ch));
+    if (cyr && !/[А-ЯІЇЄҐ]/.test(ch)) ch = KEYMAP[e.code] || '';
     if (ch === 'Ё') ch = 'Е';
     if (!ch || !this.tiles) return;
     const t = this.tiles.find((x) => !x.used && x.ch === ch);
     if (t) this.place(t.id);
-  }
-
-  setOpponent(n) {
-    if (!this.r) return;
-    const len = this.word.length;
-    this.el.oppDots.innerHTML = Array.from({ length: len }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
   }
 
   tick() {

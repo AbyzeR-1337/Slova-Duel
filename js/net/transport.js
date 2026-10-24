@@ -10,19 +10,16 @@ export const BROKERS = [
   { url: 'wss://test.mosquitto.org:8081/mqtt' },
 ];
 
-const PREFIX = 'slovaduel/v1/';
+// Топики комнаты: /h — хозяину, /a — всем гостям, /p/<id> — лично гостю.
+const PREFIX = 'igroteka/v2/';
 
 export function brokerList() {
-  const custom = new URLSearchParams(location.search).get('broker');
+  const custom = typeof location !== 'undefined' && new URLSearchParams(location.search).get('broker');
   return custom ? [{ url: custom }] : BROKERS;
 }
 
 export function newRoomCode() {
   return String(100000 + Math.floor(Math.random() * 900000));
-}
-
-export function randomId() {
-  return Math.random().toString(36).slice(2, 10);
 }
 
 function client(b) {
@@ -38,26 +35,27 @@ function parse(text) {
   }
 }
 
-export class HostRoom {
-  // canReplaceGuest(): можно ли пустить нового гостя вместо прежнего
-  // (например, прежний давно пропал со связи).
-  constructor(code, { id, onMessage, onStatus, canReplaceGuest = () => false }) {
+export class HostTransport {
+  constructor(code, { id, onMessage, onStatus = () => {} }) {
     this.code = code;
     this.id = id;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
-    this.canReplaceGuest = canReplaceGuest;
-    this.guestId = null;
-    this.guestBroker = -1;
+    this.base = PREFIX + code;
     this.clients = brokerList().map(client);
+    this.guests = new Map(); // id гостя → индекс брокера, через который он ходит
     this.firstOpen = -1;
   }
 
   start() {
-    const inbox = PREFIX + this.code + '/h';
     this.clients.forEach((c, idx) => {
-      c.subscribe(inbox);
-      c.onmessage = (topic, text) => this.receive(idx, text);
+      c.subscribe(this.base + '/h');
+      c.onmessage = (topic, text) => {
+        const msg = parse(text);
+        if (!msg || msg.f === this.id) return;
+        this.guests.set(msg.f, idx);
+        this.onMessage(msg.f, msg);
+      };
       c.onstate = (s) => {
         if (s === 'open' && this.firstOpen < 0) this.firstOpen = idx;
         this.status();
@@ -67,35 +65,30 @@ export class HostRoom {
   }
 
   status() {
-    const open = this.clients.filter((c) => c.state === 'open').length;
-    this.onStatus({ open, total: this.clients.length });
+    this.onStatus({ open: this.clients.filter((c) => c.state === 'open').length, total: this.clients.length });
   }
 
-  receive(idx, text) {
-    const msg = parse(text);
-    if (!msg) return;
-    if (msg.t === 'hello' && msg.f !== this.guestId) {
-      if (this.guestId && !this.canReplaceGuest()) {
-        this.publishTo(idx, { t: 'full', to: msg.f });
-        return;
-      }
-      this.guestId = msg.f;
-    } else if (msg.f !== this.guestId) {
-      return;
-    }
-    this.guestBroker = idx;
-    this.onMessage(msg);
+  publish(idx, topic, msg) {
+    return this.clients[idx]?.publish(topic, JSON.stringify({ ...msg, f: this.id }));
   }
 
-  publishTo(idx, msg) {
-    this.clients[idx]?.publish(PREFIX + this.code + '/g', JSON.stringify({ ...msg, f: this.id }));
+  sendTo(guestId, msg) {
+    const topic = `${this.base}/p/${guestId}`;
+    const idx = this.guests.get(guestId);
+    if (idx != null && this.clients[idx].state === 'open') this.publish(idx, topic, msg);
+    else this.clients.forEach((c, i) => this.publish(i, topic, msg));
   }
 
-  send(msg) {
-    if (!this.guestId) return;
-    const out = { ...msg, to: this.guestId };
-    if (this.clients[this.guestBroker]?.state === 'open') this.publishTo(this.guestBroker, out);
-    else this.clients.forEach((c, idx) => this.publishTo(idx, out));
+  broadcast(msg) {
+    // Публикуем один раз в каждый брокер, где есть хотя бы один гость.
+    const used = new Set([...this.guests.values()].filter((i) => this.clients[i].state === 'open'));
+    const lost = [...this.guests.values()].some((i) => this.clients[i].state !== 'open');
+    const targets = used.size && !lost ? used : this.clients.map((_, i) => i);
+    for (const i of targets) this.publish(i, this.base + '/a', msg);
+  }
+
+  forget(guestId) {
+    this.guests.delete(guestId);
   }
 
   wake() {
@@ -107,13 +100,14 @@ export class HostRoom {
   }
 }
 
-export class GuestRoom {
-  constructor(code, { id, name, hint = 0, onMessage, onStatus }) {
+export class GuestTransport {
+  constructor(code, { id, hint = 0, onMessage, onStatus = () => {}, hello }) {
     this.code = code;
     this.id = id;
-    this.name = name;
+    this.base = PREFIX + code;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
+    this.helloMsg = hello; // () => сообщение-приветствие
     this.brokers = brokerList();
     this.idx = Math.max(0, Math.min(this.brokers.length - 1, hint | 0));
     this.hostId = null;
@@ -131,7 +125,8 @@ export class GuestRoom {
     if (this.closed) return;
     const c = client(this.brokers[this.idx]);
     this.client = c;
-    c.subscribe(PREFIX + this.code + '/g');
+    c.subscribe(this.base + '/a');
+    c.subscribe(`${this.base}/p/${this.id}`);
     c.onmessage = (topic, text) => this.receive(text);
     c.onstate = (s) => {
       // После переподключения просим хозяина прислать актуальное состояние.
@@ -166,23 +161,26 @@ export class GuestRoom {
   }
 
   hello() {
-    this.send({ t: 'hello', name: this.name });
+    this.send(this.helloMsg());
   }
 
   receive(text) {
     const msg = parse(text);
-    if (!msg || msg.to !== this.id) return;
-    if (msg.t === 'welcome') {
-      this.hostId = msg.f;
-      clearInterval(this.helloTimer);
-    } else if (msg.f !== this.hostId && msg.t !== 'full') {
+    if (!msg) return;
+    if (msg.t === 'welcome' || msg.t === 'full' || msg.t === 'kicked') {
+      if (msg.to !== this.id) return;
+      if (msg.t === 'welcome') {
+        this.hostId = msg.f;
+        clearInterval(this.helloTimer);
+      }
+    } else if (msg.f !== this.hostId) {
       return;
     }
     this.onMessage(msg);
   }
 
   send(msg) {
-    this.client?.publish(PREFIX + this.code + '/h', JSON.stringify({ ...msg, f: this.id }));
+    this.client?.publish(this.base + '/h', JSON.stringify({ ...msg, f: this.id }));
   }
 
   wake() {
