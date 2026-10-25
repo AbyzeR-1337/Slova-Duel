@@ -30,7 +30,7 @@ export class UnoGame {
     this.timeScale = timeScale;
     this.timers = new Timers();
     this.players = ctx.seats.map((s) => ({ id: s.id, bot: !!s.bot, hand: [], armed: false }));
-    this.stacking = !!ctx.settings.stack;
+    this.stacking = ctx.settings.stack === 'on' || ctx.settings.stack === true;
     this.dir = 1;
     this.turn = 0;
     this.pending = 0; // сколько карт должен взять следующий при «стопке» +2/+4

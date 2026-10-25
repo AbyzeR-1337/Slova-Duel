@@ -448,7 +448,7 @@ h3 + h3, .card h3:not(:first-child) { margin-top: 16px; }
 .gtitle { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 0.92rem; }
 .gtitle .gicon { width: 30px; height: 30px; border-radius: 9px; font-size: 1rem; flex: none; }
 .gtitle .ginfo { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gview { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.gview, .gview-box { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .spectate { text-align: center; margin: auto; }
 
 .timer { position: relative; height: 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.12); overflow: hidden; flex: none; }
@@ -497,6 +497,7 @@ h3 + h3, .card h3:not(:first-child) { margin-top: 16px; }
 .toast {
   position: fixed;
   z-index: 70;
+  pointer-events: none;
   bottom: calc(env(safe-area-inset-bottom) + 90px);
   left: 50%;
   transform: translateX(-50%);

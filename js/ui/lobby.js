@@ -7,8 +7,15 @@ import { avatar } from './common.js';
 // Подписи вариантов настроек.
 function optLabel(gameId, key, v) {
   if (key === 'hands' && v === 0) return t('opt.untilEnd');
-  if (key === 'time') return t('common.secShort', { n: v });
-  if (key === 'diff' || key === 'throw') return t(`opt.${key}.${v}`);
+  if (key === 'time') return gameId === 'mahjong' || gameId === 'empires' ? t('common.minShort', { n: v }) : t('common.secShort', { n: v });
+  if (key === 'day' || key === 'talk') return t('common.secShort', { n: v });
+  if (key === 'clock') return v ? t('common.minShort', { n: v / 60 }) : t('opt.noClock');
+  if (key === 'size' && typeof v === 'number') return `${v}×${v}`;
+  if (key === 'size' || key === 'map') return t(`opt.size.${v}`);
+  if (key === 'stack' || key === 'items') return t(`common.${v}`);
+  if (key === 'mafia' && v === 'auto') return t('opt.auto');
+  if (key === 'hp') return `${v} ❤️`;
+  if (['diff', 'throw', 'level', 'speed', 'ai', 'roles'].includes(key)) return t(`opt.${key}.${v}`);
   if (key === 'start') return String(v);
   if (key === 'count') return v === 25 ? t('opt.allLevels') : String(v);
   if (key === 'bb') return `${Math.floor(v / 2)}/${v}`;

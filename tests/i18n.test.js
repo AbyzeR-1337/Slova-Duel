@@ -21,6 +21,14 @@ function dynamicKeys() {
   }
   ['easy', 'medium', 'hard', 'mix'].forEach((v) => keys.push(`opt.diff.${v}`));
   ['all', 'neighbors'].forEach((v) => keys.push(`opt.throw.${v}`));
+  // Подписи значений настроек новых игр.
+  for (const g of Object.values(GAMES)) {
+    for (const o of g.options) {
+      if (['level', 'speed', 'ai', 'roles'].includes(o.key)) o.values.forEach((v) => keys.push(`opt.${o.key}.${v}`));
+      if ((o.key === 'size' || o.key === 'map') && typeof o.values[0] === 'string') o.values.forEach((v) => keys.push(`opt.size.${v}`));
+    }
+  }
+  keys.push(...extraGameKeys());
   CATS.forEach((c) => keys.push(`poker.cat.${c}`));
   ['sb', 'bb', 'fold', 'check', 'call', 'bet', 'raise', 'allin'].forEach((a) => keys.push(`poker.act.${a}`));
   ['min', 'half', 'pot', 'allin'].forEach((a) => keys.push(`poker.preset.${a}`));
@@ -33,6 +41,30 @@ function dynamicKeys() {
   SHAPES.forEach((s) => keys.push(`shape.${s}`));
   FXS.forEach((f) => keys.push(`fx.${f}`));
   return keys;
+}
+
+// Ключи новых игр, которые собираются из частей прямо в экранах игр.
+function extraGameKeys() {
+  const k = [];
+  const add = (prefix, list) => list.forEach((x) => k.push(`${prefix}.${x}`));
+  add('chess.draw', ['stalemate', 'fifty', 'material', 'repetition']);
+  add('chess.why', ['mate', 'resign', 'time']);
+  add('uno.color', ['r', 'y', 'g', 'b']);
+  add('roulette.item', ['glass', 'soda', 'cuffs', 'saw', 'medkit', 'phone', 'invert']);
+  add('roulette.desc', ['glass', 'soda', 'cuffs', 'saw', 'medkit', 'phone', 'invert']);
+  add('mafia.role', ['mafia', 'doctor', 'detective', 'civilian']);
+  add('mafia.phase', ['intro', 'night', 'morning', 'day', 'vote', 'verdict', 'over']);
+  add('mafia.say', ['hmm', 'civil', 'quiet', 'suspect', 'vote', 'found']);
+  add('bunker.cat', ['bio', 'prof', 'health', 'hobby', 'phobia', 'bag', 'fact']);
+  add('bunker.say', ['useful', 'against', 'doubt', 'hmm']);
+  add('mahjong.size', ['small', 'medium', 'large']);
+  add('empires.terrain', ['sea', 'plains', 'forest', 'hills', 'mountains', 'desert', 'tundra']);
+  add('empires.rel', ['self', 'war', 'ally', 'truce', 'peace']);
+  add('empires.mode', ['political', 'terrain']);
+  add('empires.ev.declined', ['peace', 'ally']);
+  add('empires.offer', ['peace', 'ally']);
+  add('empires.nope', ['recruit', 'move', 'split', 'invest', 'war', 'peace', 'ally', 'unally', 'answer']);
+  return k;
 }
 
 test('все ключи из кода есть в русском словаре', () => {

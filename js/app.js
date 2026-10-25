@@ -318,7 +318,11 @@ async function mountGame(gs) {
     tn,
     setInfo: (text) => ($('#game .ginfo').textContent = text ? ' · ' + text : ''),
   };
-  ui.view = mod.mount($('#gview'), api);
+  // Каждой партии — свой контейнер: обработчики прошлой игры уходят вместе с ним.
+  const box = document.createElement('div');
+  box.className = 'gview-box';
+  $('#gview').replaceChildren(box);
+  ui.view = mod.mount(box, api);
   const pending = ui.pending;
   ui.pending = [];
   for (const d of pending) ui.view.msg(d);
