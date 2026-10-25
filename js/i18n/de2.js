@@ -261,7 +261,6 @@ export default {
   'empires.countries': 'Länder der Welt',
   'empires.atWarWith': 'Im Krieg mit',
   'empires.ranking': 'Herrscher',
-  'empires.winRule': 'Wer die Hälfte des Landes erobert, gewinnt. Läuft die Zeit ab, gewinnt das am weitesten entwickelte Reich.',
   'empires.you': 'du',
   'empires.day': 'Tag',
   'empires.mo': 'Mon.',

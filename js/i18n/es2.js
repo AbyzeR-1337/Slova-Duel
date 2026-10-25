@@ -261,7 +261,6 @@ export default {
   'empires.countries': 'Países del mundo',
   'empires.atWarWith': 'En guerra con',
   'empires.ranking': 'Gobernantes',
-  'empires.winRule': 'Gana quien conquiste la mitad de la tierra. Si se acaba el tiempo, el reino más desarrollado.',
   'empires.you': 'eres tú',
   'empires.day': 'Día',
   'empires.mo': 'mes',

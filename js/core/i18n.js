@@ -8,6 +8,11 @@ import en2 from '../i18n/en2.js';
 import uk2 from '../i18n/uk2.js';
 import es2 from '../i18n/es2.js';
 import de2 from '../i18n/de2.js';
+import ru3 from '../i18n/ru3.js';
+import en3 from '../i18n/en3.js';
+import uk3 from '../i18n/uk3.js';
+import es3 from '../i18n/es3.js';
+import de3 from '../i18n/de3.js';
 
 export const LANGS = [
   { id: 'ru', name: 'Русский', flag: '🇷🇺' },
@@ -17,7 +22,13 @@ export const LANGS = [
   { id: 'de', name: 'Deutsch', flag: '🇩🇪' },
 ];
 
-export const DICTS = { ru: { ...ru, ...ru2 }, en: { ...en, ...en2 }, uk: { ...uk, ...uk2 }, es: { ...es, ...es2 }, de: { ...de, ...de2 } };
+export const DICTS = {
+  ru: { ...ru, ...ru2, ...ru3 },
+  en: { ...en, ...en2, ...en3 },
+  uk: { ...uk, ...uk2, ...uk3 },
+  es: { ...es, ...es2, ...es3 },
+  de: { ...de, ...de2, ...de3 },
+};
 
 let lang = 'ru';
 let rules = new Intl.PluralRules('ru');

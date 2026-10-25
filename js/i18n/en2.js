@@ -261,7 +261,6 @@ export default {
   'empires.countries': 'Countries of the world',
   'empires.atWarWith': 'At war with',
   'empires.ranking': 'Rulers',
-  'empires.winRule': 'Whoever conquers half the land wins. When time runs out, the most developed realm wins.',
   'empires.you': 'you',
   'empires.day': 'Day',
   'empires.mo': 'mo',

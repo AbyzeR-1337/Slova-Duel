@@ -173,10 +173,11 @@ export const GAMES = {
     bots: true,
     content: true, // названия стран — латиницей или кириллицей
     options: [
-      { key: 'map', values: ['small', 'medium', 'large'], def: 'medium' },
-      { key: 'time', values: [10, 20, 30, 45], def: 20 },
+      { key: 'map', values: ['small', 'medium', 'large', 'huge'], def: 'medium' },
+      { key: 'time', values: [10, 20, 30, 45, 60], def: 20 },
       { key: 'speed', values: ['slow', 'normal', 'fast'], def: 'normal' },
       { key: 'ai', values: ['calm', 'normal', 'war'], def: 'normal' },
+      { key: 'goal', values: [33, 50, 66], def: 50 },
     ],
     engine: () => import('./empires/engine.js'),
     view: () => import('./empires/view.js'),

@@ -15,6 +15,7 @@ function optLabel(gameId, key, v) {
   if (key === 'stack' || key === 'items') return t(`common.${v}`);
   if (key === 'mafia' && v === 'auto') return t('opt.auto');
   if (key === 'hp') return `${v} ❤️`;
+  if (key === 'goal') return `${v}%`;
   if (['diff', 'throw', 'level', 'speed', 'ai', 'roles'].includes(key)) return t(`opt.${key}.${v}`);
   if (key === 'start') return String(v);
   if (key === 'count') return v === 25 ? t('opt.allLevels') : String(v);

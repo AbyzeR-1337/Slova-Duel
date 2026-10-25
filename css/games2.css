@@ -328,36 +328,78 @@
 /* ---------- империи ---------- */
 
 .em { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
-.em-hud { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 0.82rem; min-height: 26px; }
-.em-me { display: flex; align-items: center; gap: 6px; font-size: 0.95rem; }
-.em-stat { display: flex; gap: 10px; align-items: center; }
+.em-hud { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px; font-size: 0.8rem; min-height: 26px; }
+.em-me { display: flex; align-items: center; gap: 6px; font-size: 0.95rem; min-width: 0; }
+.em-me small { font-size: 0.7rem; }
+.em-stat { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
 .em-stat small { color: var(--muted); margin-left: 2px; }
+.em-stat .bad { color: var(--bad); font-weight: 800; }
 .em-date { margin-left: auto; color: var(--muted); }
-.em-clock { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--text); margin-left: 6px; }
+.em-clock { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--text); }
 .em-pick { width: 100%; text-align: center; font-size: 0.95rem; }
+.em-speed { display: inline-flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--card-line); }
+.em-speed button { border: 0; background: var(--btn); color: var(--text); font-size: 0.62rem; padding: 5px 7px; letter-spacing: -2px; cursor: pointer; min-width: 30px; }
+.em-speed button.sel { background: var(--accent); color: var(--accent-ink); }
+.em-paused { font-weight: 800; color: var(--accent); }
+.em-res { display: inline-flex; align-items: center; gap: 3px; }
+.em-res i { width: 34px; height: 6px; border-radius: 99px; background: linear-gradient(90deg, var(--good) var(--p), rgba(255, 255, 255, 0.2) var(--p)); }
 .em-flag { display: inline-block; width: 16px; height: 12px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4); flex: none; vertical-align: middle; }
 .em-map { position: relative; flex: 1; min-height: 200px; border-radius: 16px; overflow: hidden; background: #1f4e79; }
 .em-cv { position: absolute; inset: 0; touch-action: none; display: block; }
-.em-ticker { position: absolute; left: 8px; top: 8px; right: 60px; pointer-events: none; display: flex; flex-direction: column; gap: 3px; }
+.em-ticker { position: absolute; left: 8px; top: 8px; right: 56px; pointer-events: none; display: flex; flex-direction: column; gap: 3px; }
 .em-ticker div { align-self: flex-start; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 0.72rem; padding: 2px 8px; border-radius: 8px; max-width: 100%; }
 .em-zoom { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.em-zoom .icon-btn { width: 38px; height: 38px; background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 1.1rem; }
-.em-sheet { min-height: 48px; padding: 8px 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--card-line); display: flex; flex-direction: column; gap: 6px; }
+.em-zoom .icon-btn { width: 38px; height: 38px; background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 1.05rem; }
+.em-legend { position: absolute; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 8px; background: rgba(0, 0, 0, 0.55); color: #fff; border-radius: 10px; padding: 4px 8px; font-size: 0.68rem; max-width: calc(100% - 70px); pointer-events: none; }
+.em-legend[hidden] { display: none; }
+.em-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 3px; vertical-align: -1px; }
+.em-sheet { min-height: 44px; max-height: 38vh; overflow-y: auto; padding: 8px 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--card-line); display: flex; flex-direction: column; gap: 6px; flex: none; }
 .em-sheet p { margin: 0; }
-.em-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.em-row { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
 .em-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.em-units { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 0.82rem; align-items: center; }
+.em-morale { display: inline-block; width: 46px; height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.2); overflow: hidden; vertical-align: middle; }
+.em-morale i { display: block; height: 100%; }
+.em-tag { font-size: 0.7rem; font-weight: 800; padding: 2px 7px; border-radius: 99px; background: var(--field); }
+.em-tag.good { background: rgba(81, 207, 102, 0.3); }
+.em-tag.warn { background: rgba(252, 196, 25, 0.3); }
+.em-tag.bad { background: rgba(255, 107, 107, 0.45); }
+.em-recruit { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.em-unit { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left; padding: 6px 7px; border-radius: 12px; border: 1px solid var(--card-line); background: var(--btn); color: var(--text); font: inherit; cursor: pointer; }
+.em-unit b { font-size: 0.82rem; }
+.em-unit small { font-size: 0.64rem; color: var(--muted); line-height: 1.2; }
+.em-unit span { font-size: 0.72rem; font-weight: 800; }
+.em-unit:disabled { opacity: 0.45; cursor: default; }
+.em-techs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.em-tech { display: flex; flex-direction: column; gap: 3px; padding: 6px 7px; border-radius: 12px; background: var(--field); font-size: 0.8rem; }
+.em-tech small { font-size: 0.66rem; line-height: 1.2; }
+.em-dots { display: flex; gap: 3px; }
+.em-dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); }
+.em-dots i.on { background: var(--accent); }
+.em-prog { display: block; height: 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.em-prog i { display: block; height: 100%; background: var(--good); }
 .em-rel { font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 99px; background: var(--field); }
 .em-rel.war { background: var(--bad); color: #fff; }
 .em-rel.ally { background: var(--good); color: #08320f; }
-.em-rel.truce { background: #74c0fc; color: #062b4a; }
+.em-rel.vassal { background: #94d82d; color: #1c2a05; }
+.em-rel.overlord { background: #74c0fc; color: #062b4a; }
+.em-rel.truce { background: #91a7ff; color: #10204a; }
 .em-rel.self { background: var(--accent); color: var(--accent-ink); }
-.em-bar { display: flex; gap: 6px; }
-.em-bar .btn { flex: 1; padding-left: 6px; padding-right: 6px; }
-.em-bar .btn.primary { flex: 2; }
+.em-bar { display: flex; gap: 5px; flex: none; }
+.em-bar .btn { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; font-size: 1.05rem; line-height: 1; }
+.em-bar .btn small { font-size: 0.6rem; font-weight: 700; white-space: nowrap; }
+.em-badge { position: absolute; top: -5px; right: 4px; background: var(--bad); color: #fff; border-radius: 99px; min-width: 18px; height: 18px; font-size: 0.7rem; display: grid; place-items: center; }
 .em-list { display: flex; flex-direction: column; gap: 4px; max-height: 55vh; overflow-y: auto; }
-.em-li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: var(--field); border: 0; color: var(--text); font: inherit; text-align: left; flex-wrap: wrap; }
+.em-li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: var(--field); border: 0; color: var(--text); font: inherit; text-align: left; flex-wrap: wrap; font-size: 0.85rem; }
+.em-li.mine { box-shadow: inset 3px 0 0 var(--accent); }
 button.em-li { cursor: pointer; }
 .em-li .muted { margin-left: auto; }
+.em-wars { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.82rem; margin-bottom: 6px; }
+.em-wars .good { color: var(--good); }
+.em-wars .bad { color: var(--bad); }
+.em-chart { width: 100%; height: 180px; background: rgba(0, 0, 0, 0.25); border-radius: 10px; }
+.em-chartlegend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.75rem; }
+.em-chartlegend i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 
 @keyframes glow { 50% { box-shadow: 0 0 0 3px var(--glow, var(--accent)), 0 0 16px var(--glow, var(--accent)); } }
 

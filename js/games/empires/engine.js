@@ -1,13 +1,15 @@
 import { Timers } from '../../core/util.js';
 import { generateWorld, mulberry32 } from './world.js';
-import { Sim } from './sim.js';
+import { Sim, UNIT_TYPES, TECHS } from './sim.js';
 
 // «Империи»: каждый игрок выбирает страну в сгенерированном мире, дальше —
 // реальное время: день за днём копится золото, набираются полки, армии
 // идут, сражаются и осаждают провинции. Остальными странами правит ИИ.
+// Хозяин комнаты может поставить паузу и менять скорость.
 
 const PICK_MS = 30000;
-const TICK_MS = { slow: 900, normal: 600, fast: 380 };
+export const SPEED_MS = [0, 900, 600, 350]; // 0 — пауза
+const SPEED_OF = { slow: 1, normal: 2, fast: 3 };
 const AGGR = { calm: 0.5, normal: 1, war: 1.8 };
 
 export async function createGame(ctx) {
@@ -24,12 +26,13 @@ export class EmpiresGame {
     this.seed = Math.floor(rng() * 2 ** 31);
     this.world = generateWorld({ seed: this.seed, size: st.map || 'medium', lang: ctx.lang });
     this.sim = new Sim(this.world, { rng: mulberry32(this.seed ^ 0x5bd1e995), aggression: AGGR[st.ai] ?? 1 });
-    this.tickMs = TICK_MS[st.speed] || TICK_MS.normal;
-    this.every = this.tickMs >= 500 ? 1 : 2; // как часто рассылать состояние
+    this.speed = SPEED_OF[st.speed] || 2;
+    this.goal = (Number(st.goal) || 50) / 100;
     this.limit = (Number(st.time) || 20) * 60000;
     this.seats = ctx.seats.map((s) => ({ id: s.id, bot: !!s.bot, c: null, fell: 0 }));
     this.phase = 'pick';
     this.pending = { ev: [] };
+    this.ticks = 0;
   }
 
   ms(x) {
@@ -76,37 +79,60 @@ export class EmpiresGame {
     for (const s of this.seats) if (s.c == null) s.c = this.randomCountry();
     for (const s of this.seats) if (!s.bot && s.c != null) this.sim.countries[s.c].player = s.id;
     this.phase = 'play';
-    this.started = Date.now();
-    this.deadline = this.started + this.ms(this.limit);
-    this.timers.later(() => this.end('time'), this.ms(this.limit));
+    this.left = this.ms(this.limit);
+    this.lastStep = Date.now();
     this.broadcastFull();
     this.loop();
   }
 
   loop() {
+    this.timers.cancel(this.loopTimer);
+    if (this.phase !== 'play' || !this.speed) return;
     this.loopTimer = this.timers.later(() => {
       if (this.phase !== 'play') return;
       this.step();
       if (this.phase === 'play') this.loop();
-    }, this.ms(this.tickMs));
+    }, this.ms(SPEED_MS[this.speed]));
+  }
+
+  // Время партии идёт, только пока игра не на паузе.
+  spend() {
+    const now = Date.now();
+    if (this.speed) this.left -= now - this.lastStep;
+    this.lastStep = now;
   }
 
   step() {
     const sim = this.sim;
+    this.spend();
     sim.tick();
+    this.ticks++;
     this.collect();
-    for (const s of this.seats) if (s.c != null && !s.fell && !sim.countries[s.c].alive) s.fell = sim.day;
-    const dom = sim.dominant();
-    if (dom != null) return this.end('domination', dom);
+    for (const s of this.seats) {
+      if (s.c == null) continue;
+      const alive = sim.countries[s.c].alive;
+      if (!s.fell && !alive) s.fell = sim.day;
+      else if (s.fell && alive) s.fell = 0; // восстание вернуло страну
+    }
+    const dom = sim.countries.find((c) => c.alive && sim.realm(c.id) >= sim.landCount * this.goal);
+    if (dom) return this.end('domination', dom.id);
     if (this.seats.every((s) => s.c == null || s.fell)) return this.end('fallen');
-    if (sim.day % this.every === 0) this.flush();
+    if (this.left <= 0) return this.end('time');
+    if (this.ticks % (SPEED_MS[this.speed] >= 500 ? 1 : 2) === 0) this.flush();
   }
 
   // Изменения копятся между рассылками, чтобы не терять события.
   collect() {
     const own = this.sim.flushChanges();
     if (own.length) this.pending.own = [...(this.pending.own || []), ...own];
-    if (this.sim.events.length) this.pending.ev.push(...this.sim.events);
+    for (const e of this.sim.events) {
+      this.pending.ev.push(e);
+      // Событие страны игрока — лично ему, с выбором.
+      if (e.t === 'event') {
+        const s = this.seats.find((x) => x.c === e.c && !x.bot);
+        if (s) this.ctx.sendTo(s.id, { t: 'event', id: e.id, type: e.type, hex: e.hex ?? null });
+      }
+    }
     this.sim.events = [];
   }
 
@@ -115,13 +141,14 @@ export class EmpiresGame {
     const msg = {
       t: 'tick',
       day: sim.day,
-      left: Math.max(0, this.deadline - Date.now()),
+      left: Math.max(0, this.left),
+      speed: this.speed,
       armies: sim.armyList(),
       cs: sim.countryList(),
       sieges: sim.siegeList(),
     };
     if (this.pending.own) msg.own = this.pending.own;
-    if (this.pending.ev.length) msg.ev = this.pending.ev;
+    if (this.pending.ev.length) msg.ev = this.pending.ev.filter((e) => e.t !== 'event' && e.t !== 'decided');
     if (sim.dipDirty) {
       msg.dip = sim.diplomacy();
       sim.dipDirty = false;
@@ -143,35 +170,69 @@ export class EmpiresGame {
       if (s && !s.bot) this.pick(s, Number(a.c));
       return;
     }
+    if (a.t === 'speed') {
+      // Скоростью управляет хозяин комнаты.
+      const v = Number(a.v);
+      if (pid !== this.ctx.hostId || this.phase !== 'play' || !(v >= 0 && v <= 3)) return;
+      this.spend();
+      this.speed = v;
+      this.loop();
+      this.collect();
+      return this.flush();
+    }
     const c = this.myCountry(pid);
     if (c == null) return;
     const sim = this.sim;
+    const n = (x) => Number(x);
     let ok = true;
     switch (a.t) {
       case 'recruit':
-        ok = sim.recruit(c, a.hex == null ? null : Number(a.hex));
+        ok = sim.recruit(c, a.hex == null ? null : n(a.hex), UNIT_TYPES.includes(a.unit) ? a.unit : 'inf');
         break;
       case 'move':
-        ok = sim.order(c, Number(a.army), Number(a.to));
+        ok = sim.order(c, n(a.army), n(a.to));
+        break;
+      case 'stop':
+        ok = sim.stop(c, n(a.army));
         break;
       case 'split':
-        ok = !!sim.split(c, Number(a.army));
+        ok = !!sim.split(c, n(a.army));
+        break;
+      case 'merge':
+        ok = sim.merge(c, n(a.army));
+        break;
+      case 'build':
+        ok = sim.build(c, n(a.hex), a.kind);
         break;
       case 'invest':
-        ok = sim.invest(c, Number(a.hex));
+        ok = sim.build(c, n(a.hex), 'dev');
+        break;
+      case 'research':
+        ok = TECHS.includes(a.tech) && sim.research(c, a.tech);
         break;
       case 'war':
-        ok = sim.declareWar(c, Number(a.c));
+        ok = sim.declareWar(c, n(a.c));
         break;
       case 'peace':
+      case 'tribute':
+      case 'vassal':
       case 'ally':
-        ok = sim.propose(a.t, c, Number(a.c)) != null;
+        ok = sim.propose(a.t, c, n(a.c)) != null;
         break;
       case 'unally':
-        ok = sim.breakAlliance(c, Number(a.c));
+        ok = sim.breakAlliance(c, n(a.c));
+        break;
+      case 'release':
+        ok = sim.release(c, n(a.c));
+        break;
+      case 'integrate':
+        ok = sim.integrate(c, n(a.c));
         break;
       case 'answer':
-        ok = sim.answer(c, Number(a.id), !!a.yes);
+        ok = sim.answer(c, n(a.id), !!a.yes);
+        break;
+      case 'decide':
+        ok = sim.decide(c, n(a.id), n(a.choice));
         break;
       default:
         return;
@@ -188,9 +249,10 @@ export class EmpiresGame {
     this.flush();
     this.phase = 'over';
     this.timers.clear();
+    this.sim.snapshotHistory();
     this.result = { reason, winner };
     this.broadcastFull();
-    this.timers.later(() => this.ctx.end(this.finish()), this.ms(6000));
+    this.timers.later(() => this.ctx.end(this.finish()), this.ms(8000));
   }
 
   finish() {
@@ -208,6 +270,15 @@ export class EmpiresGame {
     };
   }
 
+  // История размеров для графика в конце: страны игроков и самые большие.
+  chart() {
+    const h = this.sim.history;
+    const ids = new Set(this.seats.filter((s) => s.c != null).map((s) => s.c));
+    const peak = this.sim.countries.map((c) => [c.id, Math.max(...h.map((row) => row[c.id]))]).sort((a, b) => b[1] - a[1]);
+    for (const [id] of peak.slice(0, 6)) ids.add(id);
+    return { ids: [...ids], rows: h.map((row) => [...ids].map((id) => row[id])) };
+  }
+
   worldMsg() {
     const w = this.world;
     return {
@@ -215,34 +286,41 @@ export class EmpiresGame {
       w: w.w,
       h: w.h,
       terrain: w.terrain.join(''),
+      river: w.river.join(''),
+      rivers: w.rivers,
       countries: w.countries.map((c) => ({ name: c.name, color: c.color })),
     };
   }
 
-  fullState() {
+  fullState(pid) {
     const sim = this.sim;
+    const s = pid ? this.seat(pid) : null;
     return {
       t: 'full',
       phase: this.phase,
       day: sim.day,
-      left: this.deadline ? Math.max(0, this.deadline - Date.now()) : null,
-      owner: sim.owner.slice(),
-      dev: sim.dev.join(''),
-      picks: Object.fromEntries(this.seats.filter((s) => s.c != null).map((s) => [s.id, s.c])),
+      left: this.phase === 'pick' ? Math.max(0, this.deadline - Date.now()) : Math.max(0, this.left ?? this.limit),
+      speed: this.speed,
+      goal: this.goal,
+      provinces: Array.from({ length: sim.n }, (_, h) => (sim.terrain[h] ? sim.provinceState(h) : null)).filter(Boolean),
+      picks: Object.fromEntries(this.seats.filter((x) => x.c != null).map((x) => [x.id, x.c])),
       armies: sim.armyList(),
       cs: sim.countryList(),
       sieges: sim.siegeList(),
       dip: sim.diplomacy(),
       result: this.result || null,
+      chart: this.phase === 'over' ? this.chart() : null,
+      events: s && s.c != null ? sim.pending.filter((e) => e.c === s.c).map((e) => ({ id: e.id, type: e.type, hex: e.hex ?? null })) : [],
     };
   }
 
   broadcastFull() {
     this.ctx.broadcast(this.fullState());
+    for (const s of this.seats) if (!s.bot && s.c != null) for (const e of this.sim.pending.filter((x) => x.c === s.c)) this.ctx.sendTo(s.id, { t: 'event', id: e.id, type: e.type, hex: e.hex ?? null });
   }
 
-  snapshot() {
-    return [this.worldMsg(), this.fullState()];
+  snapshot(pid) {
+    return [this.worldMsg(), this.fullState(pid)];
   }
 
   playerLeft() {

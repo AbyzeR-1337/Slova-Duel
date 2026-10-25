@@ -261,7 +261,6 @@ export default {
   'empires.countries': 'Страны мира',
   'empires.atWarWith': 'Война с',
   'empires.ranking': 'Правители',
-  'empires.winRule': 'Побеждает тот, кто захватит половину суши. Если время вышло — у кого больше развитых земель.',
   'empires.you': 'это ты',
   'empires.day': 'День',
   'empires.mo': 'мес',

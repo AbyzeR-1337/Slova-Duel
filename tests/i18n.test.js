@@ -7,6 +7,7 @@ import { GAMES } from '../js/games/registry.js';
 import { CATS } from '../js/games/poker/eval.js';
 import { BACKGROUNDS, ACCENTS, STYLES } from '../js/core/theme.js';
 import { SHAPES, FXS } from '../js/core/profile.js';
+import { UNIT_TYPES, TECHS, EVENTS } from '../js/games/empires/sim.js';
 
 function files(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(path.join(dir, d.name)) : [path.join(dir, d.name)]));
@@ -59,11 +60,18 @@ function extraGameKeys() {
   add('bunker.say', ['useful', 'against', 'doubt', 'hmm']);
   add('mahjong.size', ['small', 'medium', 'large']);
   add('empires.terrain', ['sea', 'plains', 'forest', 'hills', 'mountains', 'desert', 'tundra']);
-  add('empires.rel', ['self', 'war', 'ally', 'truce', 'peace']);
-  add('empires.mode', ['political', 'terrain']);
-  add('empires.ev.declined', ['peace', 'ally']);
-  add('empires.offer', ['peace', 'ally']);
-  add('empires.nope', ['recruit', 'move', 'split', 'invest', 'war', 'peace', 'ally', 'unally', 'answer']);
+  add('empires.rel', ['self', 'war', 'ally', 'truce', 'peace', 'vassal', 'overlord']);
+  add('empires.mode', ['political', 'diplomacy', 'economy', 'terrain']);
+  add('empires.ev.declined', ['peace', 'ally', 'tribute', 'vassal']);
+  add('empires.ev', ['revolt', 'reborn']);
+  add('empires.offer', ['peace', 'ally', 'tribute', 'vassal']);
+  add('empires.nope', ['recruit', 'move', 'stop', 'split', 'merge', 'build', 'invest', 'research', 'war', 'peace', 'tribute', 'vassal', 'ally', 'unally', 'release', 'integrate', 'answer', 'decide']);
+  add('empires.unit', UNIT_TYPES);
+  add('empires.unitDesc', UNIT_TYPES);
+  add('empires.tech', TECHS);
+  add('empires.techDesc', TECHS);
+  add('empires.unrest', [1, 2, 3]);
+  for (const e of EVENTS) add('empires.event.' + e, ['title', 'text', 'a', 'b']);
   return k;
 }
 

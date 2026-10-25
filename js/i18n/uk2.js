@@ -261,7 +261,6 @@ export default {
   'empires.countries': 'Країни світу',
   'empires.atWarWith': 'Війна з',
   'empires.ranking': 'Правителі',
-  'empires.winRule': 'Перемагає той, хто захопить половину суходолу. Якщо час вийшов — у кого більше розвинених земель.',
   'empires.you': 'це ти',
   'empires.day': 'День',
   'empires.mo': 'міс',

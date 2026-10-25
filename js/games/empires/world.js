@@ -11,7 +11,79 @@ export const SIZES = {
   small: { w: 24, h: 16, countries: 14 },
   medium: { w: 30, h: 20, countries: 22 },
   large: { w: 36, h: 24, countries: 30 },
+  huge: { w: 44, h: 28, countries: 40 },
 };
+
+// Двоичная куча для поиска пути.
+class Heap {
+  constructor() {
+    this.a = [];
+  }
+  push(p, v) {
+    const a = this.a;
+    a.push([p, v]);
+    let i = a.length - 1;
+    while (i > 0) {
+      const j = (i - 1) >> 1;
+      if (a[j][0] <= a[i][0]) break;
+      [a[i], a[j]] = [a[j], a[i]];
+      i = j;
+    }
+  }
+  pop() {
+    const a = this.a;
+    const top = a[0];
+    const last = a.pop();
+    if (a.length) {
+      a[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < a.length && a[l][0] < a[m][0]) m = l;
+        if (r < a.length && a[r][0] < a[m][0]) m = r;
+        if (m === i) break;
+        [a[i], a[m]] = [a[m], a[i]];
+        i = m;
+      }
+    }
+    return top;
+  }
+  get size() {
+    return this.a.length;
+  }
+}
+
+// Кратчайший по времени путь (Дейкстра). nb — списки соседей, cost(x) — цена входа
+// в клетку, ok(x) — можно ли в неё войти. Возвращает клетки без стартовой или null.
+export function findPath(nb, from, to, ok, cost) {
+  if (from === to || !ok(to)) return null;
+  const n = nb.length;
+  const dist = new Float32Array(n).fill(Infinity);
+  const prev = new Int32Array(n).fill(-1);
+  const heap = new Heap();
+  dist[from] = 0;
+  heap.push(0, from);
+  while (heap.size) {
+    const [d, x] = heap.pop();
+    if (x === to) break;
+    if (d > dist[x]) continue;
+    for (const y of nb[x]) {
+      if (!ok(y)) continue;
+      const nd = d + cost(y);
+      if (nd < dist[y]) {
+        dist[y] = nd;
+        prev[y] = x;
+        heap.push(nd, y);
+      }
+    }
+  }
+  if (prev[to] < 0) return null;
+  const out = [];
+  for (let x = to; x !== from; x = prev[x]) out.push(x);
+  return out.reverse();
+}
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -191,9 +263,45 @@ export function generateWorld({ seed = 1, size = 'medium', lang = 'en' } = {}) {
   const land = [];
   for (let i = 0; i < n; i++) if (terrain[i]) land.push(i);
 
+  // Реки: от гор и холмов вниз по склону до моря. Клетки с рекой плодороднее,
+  // а наступать через реку труднее.
+  const river = new Uint8Array(n);
+  const rivers = [];
+  const sources = land.filter((i) => terrain[i] === T.hills || terrain[i] === T.mountains);
+  const want = Math.round(land.length / 40);
+  for (let tries = 0; tries < want * 6 && rivers.length < want; tries++) {
+    const src = sources[Math.floor(rng() * sources.length)];
+    if (src == null || river[src]) continue;
+    const path = [src];
+    let cur = src;
+    let mouth = -1;
+    for (let step = 0; step < 18; step++) {
+      let nx = -1;
+      let low = e[cur];
+      for (const y of neighbors(w, h, cur)) {
+        if (!terrain[y]) {
+          mouth = y;
+          break;
+        }
+        if (e[y] < low && !path.includes(y)) {
+          low = e[y];
+          nx = y;
+        }
+      }
+      if (mouth >= 0 || nx < 0) break;
+      path.push(nx);
+      if (river[nx]) break; // влились в другую реку
+      cur = nx;
+    }
+    const joined = river[path[path.length - 1]] && path.length > 1;
+    if ((mouth < 0 && !joined) || path.length < 3) continue;
+    for (const x of path) river[x] = 1;
+    rivers.push({ path, mouth });
+  }
+
   const DEV = [0, 3, 2, 2, 1, 1, 1];
   const dev = new Uint8Array(n);
-  for (const i of land) dev[i] = Math.max(1, Math.min(5, DEV[terrain[i]] + (rng() < 0.3 ? 1 : 0) - (rng() < 0.15 ? 1 : 0)));
+  for (const i of land) dev[i] = Math.max(1, Math.min(6, DEV[terrain[i]] + (rng() < 0.3 ? 1 : 0) - (rng() < 0.15 ? 1 : 0) + river[i]));
 
   // Столицы: дальние друг от друга точки, лучше на равнинах.
   const good = land.filter((i) => terrain[i] !== T.mountains);
@@ -249,5 +357,5 @@ export function generateWorld({ seed = 1, size = 'medium', lang = 'en' } = {}) {
     names.add(name);
     return { id: i, name, color: countryColor(i), capital };
   });
-  return { seed, size, w, h, terrain: Array.from(terrain), dev: Array.from(dev), owner: Array.from(owner), countries };
+  return { seed, size, w, h, terrain: Array.from(terrain), dev: Array.from(dev), owner: Array.from(owner), river: Array.from(river), rivers, countries };
 }
